@@ -14,6 +14,12 @@ struct PanelView: View {
             GroupBox("Color") {
                 VStack(spacing: 6) {
                     row("Saturation", $model.tune.saturation, 0.3...2.0, percent)
+                    if model.tune.enabled, let safe = model.safeSaturation, model.tune.saturation < safe - 0.005 {
+                        Text("Below \(percent(safe)) on this display, Chrome-based browsers (Chrome, Brave, Edge) may show a black window.")
+                            .font(.caption).foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     row("Warmth", $model.tune.kelvin, 2700...6500, { "\(Int($0)) K" }, reversed: true)
                     row("Contrast", $model.tune.contrast, 0.5...1.5, percent)
                     row("Mid tones", $model.tune.gamma, 0.5...2.0, { String(format: "%.2f", $0) })
