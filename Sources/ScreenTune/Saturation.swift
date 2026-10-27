@@ -59,6 +59,19 @@ enum Saturation {
         }
     }
 
+    /// Lowest saturation that Chrome-based browsers still draw on every display (see ICC.lowestSafeSaturation).
+    static func lowestSafe() -> Double? {
+        Gamma.displays().compactMap { id -> Double? in
+            guard let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() else { return nil }
+            let key = CFUUIDCreateString(nil, uuid) as String
+            // While our profile is active, the display's own profile is the saved copy.
+            let own = isOurs(currentCustomURL(uuid))
+                ? try? Data(contentsOf: originalCopy(key))
+                : CGDisplayCopyColorSpace(id).copyICCData() as Data?
+            return own.flatMap(ICC.lowestSafeSaturation)
+        }.max()
+    }
+
     static func restoreAll() {
         for id in Gamma.displays() {
             if let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue() { restore(uuid) }

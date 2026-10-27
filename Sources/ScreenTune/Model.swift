@@ -9,6 +9,8 @@ final class Model: ObservableObject {
     }
     @Published var currentLux: Double?
     @Published var currentBrightness: Double?
+    /// Below this saturation (a whole percent), Chrome-based browsers show a black window.
+    @Published var safeSaturation: Double?
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private(set) lazy var auto = AutoBrightness(model: self)
@@ -65,6 +67,7 @@ final class Model: ObservableObject {
 
     private func applyAll() {
         Saturation.apply(tune.enabled ? tune.saturation : 1)
+        safeSaturation = Saturation.lowestSafe().map { ($0 * 100).rounded(.up) / 100 }
         reapplyGammaSoon()
         tune.autoBrightness && tune.enabled ? auto.start() : auto.stop()
     }

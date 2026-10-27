@@ -52,25 +52,7 @@ enum ICC {
     /// Returns a copy of `profile` whose primaries are changed so that ColorSync
     /// shows colors with saturation scaled by `s` (1 = unchanged).
     static func saturated(_ profile: Data, _ s: Double, name: String) -> Data? {
-        guard let (header, tags) = parse(profile),
-              let r = xyz(tags, "rXYZ"), let g = xyz(tags, "gXYZ"), let b = xyz(tags, "bXYZ")
-        else { return nil }
-
-        // Displayed = M * Sat(s) * M⁻¹, so the claimed matrix is M * Sat(1/s).
-        // Sat(a) = L + a(I - L), where every row of L is the luminance weights w.
-        let cols = [r, g, b]
-        let ySum = r[1] + g[1] + b[1]
-        let w = cols.map { $0[1] / ySum }
-        let a = 1 / s
-        var newCols: [[Double]] = []
-        for j in 0..<3 {
-            var c = [0.0, 0.0, 0.0]
-            for k in 0..<3 {
-                let sat = w[j] + a * ((k == j ? 1 : 0) - w[j])
-                for row in 0..<3 { c[row] += cols[k][row] * sat }
-            }
-            newCols.append(c)
-        }
+        guard let (header, tags) = parse(profile), let newCols = primaries(tags, s) else { return nil }
 
         let version = header[8]
         var out: [Tag] = []
@@ -87,6 +69,59 @@ enum ICC {
         }
         return build(header: header, tags: out)
     }
+
+    /// The lowest saturation whose profile Chromium (Chrome, Brave, Edge) still draws.
+    /// Lower, a claimed primary's chromaticity (after adapting to D65) leaves 0...1,
+    /// and those browsers show a black window. Measured: green y passing 1.
+    static func lowestSafeSaturation(_ profile: Data) -> Double? {
+        guard let (_, tags) = parse(profile) else { return nil }
+        func safe(_ s: Double) -> Bool {
+            guard let cols = primaries(tags, s) else { return false }
+            return cols.allSatisfy { c in
+                let v = (0..<3).map { i in (0..<3).reduce(0.0) { $0 + bradfordD50toD65[i][$1] * c[$1] } }
+                let sum = v[0] + v[1] + v[2]
+                guard sum > 0 else { return false }
+                return (0...1).contains(v[0] / sum) && (0...1).contains(v[1] / sum)
+            }
+        }
+        guard safe(1) else { return nil }
+        // Lower saturation pushes the claimed primaries further out, so the check flips once.
+        var lo = 0.01, hi = 1.0
+        if safe(lo) { return lo }
+        for _ in 0..<30 {
+            let mid = (lo + hi) / 2
+            if safe(mid) { hi = mid } else { lo = mid }
+        }
+        return hi
+    }
+
+    /// Primaries (XYZ columns) to claim so that ColorSync shows saturation scaled by `s`.
+    private static func primaries(_ tags: [Tag], _ s: Double) -> [[Double]]? {
+        guard let r = xyz(tags, "rXYZ"), let g = xyz(tags, "gXYZ"), let b = xyz(tags, "bXYZ") else { return nil }
+
+        // Displayed = M * Sat(s) * M⁻¹, so the claimed matrix is M * Sat(1/s).
+        // Sat(a) = L + a(I - L), where every row of L is the luminance weights w.
+        let cols = [r, g, b]
+        let ySum = r[1] + g[1] + b[1]
+        let w = cols.map { $0[1] / ySum }
+        let a = 1 / s
+        var newCols: [[Double]] = []
+        for j in 0..<3 {
+            var c = [0.0, 0.0, 0.0]
+            for k in 0..<3 {
+                let sat = w[j] + a * ((k == j ? 1 : 0) - w[j])
+                for row in 0..<3 { c[row] += cols[k][row] * sat }
+            }
+            newCols.append(c)
+        }
+        return newCols
+    }
+
+    private static let bradfordD50toD65: [[Double]] = [
+        [0.9555766, -0.0230393, 0.0631636],
+        [-0.0282895, 1.0099416, 0.0210077],
+        [0.0122982, -0.0204830, 1.3299098],
+    ]
 
     static func description(_ profile: Data) -> String? {
         guard let (_, tags) = parse(profile), let d = tags.first(where: { $0.sig == "desc" })?.data,
